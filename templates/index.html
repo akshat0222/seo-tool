@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SEO Meta Analyzer</title>
+</head>
+<body>
+
+<h2>Single URL Analyzer</h2>
+<input type="text" id="url" placeholder="Enter website URL" />
+<button onclick="analyze()">Analyze</button>
+
+<pre id="result"></pre>
+
+<hr>
+
+<h2>Bulk URL Analyzer (Excel)</h2>
+<form action="/bulk" method="POST" enctype="multipart/form-data">
+  <input type="file" name="file" accept=".xlsx" required />
+  <button type="submit">Upload & Analyze</button>
+</form>
+
+<script>
+async function analyze() {
+  const url = document.getElementById("url").value;
+  const res = await fetch(`/analyze?url=${encodeURIComponent(url)}`);
+  const data = await res.json();
+  document.getElementById("result").innerText =
+    JSON.stringify(data, null, 2);
+}
+</script>
+
+</body>
+</html>
+
