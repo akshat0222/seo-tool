@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -6,8 +7,10 @@ import os
 import uuid
 
 app = Flask(__name__)
+CORS(app)  # 🔥 REQUIRED for static frontend → backend communication
 
-UPLOAD_FOLDER = "uploads"
+# Render-safe temp directory
+UPLOAD_FOLDER = "/tmp"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def extract_page_data(url):
@@ -17,26 +20,19 @@ def extract_page_data(url):
 
     soup = BeautifulSoup(response.text, "lxml")
 
-    # Meta Title
     meta_title = soup.title.string.strip() if soup.title else ""
-
-    # Meta Description
     meta_desc = soup.find("meta", attrs={"name": "description"})
     meta_description = meta_desc["content"].strip() if meta_desc else ""
 
-    # OG Title
     og_title_tag = soup.find("meta", property="og:title")
     og_title = og_title_tag["content"].strip() if og_title_tag else ""
 
-    # OG Description
     og_desc_tag = soup.find("meta", property="og:description")
     og_description = og_desc_tag["content"].strip() if og_desc_tag else ""
 
-    # Page Title (H1)
     h1 = soup.find("h1")
     page_title = h1.get_text(strip=True) if h1 else ""
 
-    # Page Description (first meaningful paragraph)
     page_description = ""
     for p in soup.find_all("p"):
         text = p.get_text(strip=True)
@@ -53,17 +49,20 @@ def extract_page_data(url):
         "page_description": page_description
     }
 
+# 🔹 Health Check (Render friendly)
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "SEO Analyzer API running"}), 200
 
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-# 🔹 Single URL
+# 🔹 Single URL API
 @app.route("/analyze", methods=["GET"])
 def analyze():
     url = request.args.get("url")
     if not url:
-        return jsonify({"error": "URL required"}), 400
+        return jsonify({"error": "URL is required"}), 400
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
 
     try:
         data = extract_page_data(url)
@@ -72,8 +71,7 @@ def analyze():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# 🔹 Bulk Excel Upload
+# 🔹 Bulk Excel API
 @app.route("/bulk", methods=["POST"])
 def bulk_analyze():
     if "file" not in request.files:
@@ -83,7 +81,6 @@ def bulk_analyze():
     if file.filename == "":
         return jsonify({"error": "No file selected"}), 400
 
-    # Save uploaded file
     upload_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}.xlsx")
     file.save(upload_path)
 
@@ -93,22 +90,18 @@ def bulk_analyze():
         return jsonify({"error": "Invalid Excel file"}), 400
 
     if "url" not in df.columns:
-        return jsonify({"error": "Excel must contain a 'url' column"}), 400
+        return jsonify({"error": "Excel must have 'url' column"}), 400
 
-    # Drop empty URLs
     df = df.dropna(subset=["url"])
 
-    # Optional safety limit
     if len(df) > 100:
-        return jsonify({"error": "Maximum 100 URLs allowed per upload"}), 400
+        return jsonify({"error": "Maximum 100 URLs allowed"}), 400
 
     results = []
 
     for raw_url in df["url"]:
         try:
             url = str(raw_url).strip()
-
-            # Auto-fix missing scheme
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
 
@@ -122,18 +115,12 @@ def bulk_analyze():
                 "error": str(e)
             })
 
-    # Save result file
     result_df = pd.DataFrame(results)
     output_path = os.path.join(
         UPLOAD_FOLDER, f"results_{uuid.uuid4()}.xlsx"
     )
     result_df.to_excel(output_path, index=False)
 
-    # Clean up uploaded file
     os.remove(upload_path)
 
     return send_file(output_path, as_attachment=True)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
